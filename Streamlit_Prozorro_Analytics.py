@@ -1,114 +1,55 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
-from io import BytesIO
 import os
 
-st.set_page_config(page_title="Порівняльна аналітика Prozorro", layout="wide")
+file_path = os.path.join(os.path.dirname(__file__), "prozorro_data.csv")
 
-# --- Загрузка CSV з тієї ж папки ------------------------------------------------
-csv_file = 'prozorro_data.csv'
-if not os.path.exists(csv_file):
-    st.error(f"Файл {csv_file} не знайдено в поточній папці!")
+work = pd.read_csv(file_path)
+
+expected_cols = ["tender_id", "procuring_entity", "region", "category", "value", "participants"]
+
+missing = [col for col in expected_cols if col not in work.columns]
+if missing:
+    st.error(f"❌ Відсутні колонки у файлі: {missing}")
     st.stop()
 
-try:
-    df = pd.read_csv(csv_file, low_memory=False)
-except Exception as e:
-    st.error(f"Не вдалося прочитати CSV: {e}")
-    st.stop()
+work["_value"] = pd.to_numeric(work["value"], errors="coerce")
+work["_participants"] = pd.to_numeric(work["participants"], errors="coerce")
 
-# --- Призначення колонок за назвами CSV ----------------------------------------
-buyer_col = 'supplierName'
-amount_col = "valueAmount"
-participants_col = "supplierID"  
-buyer_col = "disposerName"
-region_col = "disposerID"         
-category_col = "description"
-date_col = "dateSigned"
+st.title("📊 Порівняльна аналітика державних закупівель (Prozorro)")
 
-# --- Підготовка робочого DataFrame ---------------------------------------------
-work = df.copy()
-work['_amount'] = pd.to_numeric(work[amount_col], errors='coerce')
-work['_participants'] = pd.to_numeric(work[participants_col], errors='coerce') if participants_col else np.nan
-work['_date'] = pd.to_datetime(work[date_col], errors='coerce') if date_col else pd.NaT
+region_filter = st.multiselect("🌍 Обери регіон:", sorted(work["region"].unique()))
+category_filter = st.multiselect("📦 Обери категорію:", sorted(work["category"].unique()))
+buyer_filter = st.multiselect("🏢 Обери замовника:", sorted(work["procuring_entity"].unique()))
 
-# --- Вивід основних даних ------------------------------------------------------
-st.title('Порівняльна аналітика державних закупівель — Prozorro')
-st.subheader('Перші 10 рядків CSV')
-st.dataframe(work.head(10))
+filtered = work.copy()
+if region_filter:
+    filtered = filtered[filtered["region"].isin(region_filter)]
+if category_filter:
+    filtered = filtered[filtered["category"].isin(category_filter)]
+if buyer_filter:
+    filtered = filtered[filtered["procuring_entity"].isin(buyer_filter)]
 
-# --- Метрики -------------------------------------------------------------------
-total_sum = work['_amount'].sum(min_count=1)
-st.metric('Загальна сума контрактів', f"{total_sum:,.2f}" if not pd.isna(total_sum) else 'N/A')
-if work['_participants'].notna().any():
-    avg_participants = work['_participants'].mean()
-    st.metric('Середня конкуренція (учасники)', f"{avg_participants:.2f}")
+total_value = filtered["_value"].sum()
+avg_participants = filtered["_participants"].mean()
 
-# --- Фільтри -------------------------------------------------------------------
-st.header('Фільтри')
-filter_cols = st.columns(3)
-with filter_cols[0]:
-    if buyer_col:
-        buyer_options = ['(усі)'] + sorted(work[buyer_col].dropna().unique())
-        buyer_sel = st.selectbox('Замовник', buyer_options, index=0)
-    else:
-        buyer_sel = '(усі)'
-with filter_cols[1]:
-    if region_col:
-        region_options = ['(усі)'] + sorted(work[region_col].dropna().unique())
-        region_sel = st.selectbox('Регіон', region_options, index=0)
-    else:
-        region_sel = '(усі)'
-with filter_cols[2]:
-    if category_col:
-        category_options = ['(усі)'] + sorted(work[category_col].dropna().unique())
-        category_sel = st.selectbox('Категорія', category_options, index=0)
-    else:
-        category_sel = '(усі)'
+st.metric("💰 Загальна сума контрактів", f"{total_value:,.2f} грн")
+st.metric("👥 Середня кількість учасників", f"{avg_participants:.2f}")
 
-# --- Застосування фільтрів ---------------------------------------------------
-mask = pd.Series(True, index=work.index)
-if buyer_sel != '(усі)' and buyer_col:
-    mask &= work[buyer_col] == buyer_sel
-if region_sel != '(усі)' and region_col:
-    mask &= work[region_col] == region_sel
-if category_sel != '(усі)' and category_col:
-    mask &= work[category_col] == category_sel
+st.subheader("📈 Сума контрактів за регіонами")
+fig1 = px.bar(filtered.groupby("region")["_value"].sum().reset_index(),
+              x="region", y="_value", title="Сума контрактів за регіонами", text_auto=True)
+st.plotly_chart(fig1, use_container_width=True)
 
-filtered = work[mask].copy()
-st.write(f'Показано рядків: {len(filtered)} з {len(work)}')
+st.subheader("📊 Сума контрактів за категоріями")
+fig2 = px.bar(filtered.groupby("category")["_value"].sum().reset_index(),
+              x="category", y="_value", title="Сума контрактів за категоріями", text_auto=True)
+st.plotly_chart(fig2, use_container_width=True)
 
-# --- Візуалізації ---------------------------------------------------------------
-st.header('Візуалізації')
-
-# Сума контрактів за категоріями
-if category_col:
-    agg = filtered.groupby(category_col)['_amount'].sum().reset_index().sort_values('_amount', ascending=False)
-    fig = px.bar(agg, x=category_col, y='_amount', title='Сума контрактів за категоріями', labels={'_amount':'Сума'})
-    st.plotly_chart(fig, use_container_width=True)
-
-# Розподіл кількості учасників
-if filtered['_participants'].notna().any():
-    fig2 = px.histogram(filtered, x='_participants', nbins=20, title='Розподіл кількості учасників')
-    st.plotly_chart(fig2, use_container_width=True)
-    st.write(filtered['_participants'].describe().to_frame().T)
-
-# --- Експорт ------------------------------------------------------------------
-st.header('Експорт результатів')
-from io import BytesIO
-
-def to_excel_bytes(df_to_save):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_to_save.to_excel(writer, index=False, sheet_name='filtered')
-        writer.save()
-    return output.getvalue()
-
-if st.button('Завантажити фільтровані дані (Excel)'):
-    if len(filtered) == 0:
-        st.warning('Немає даних для завантаження')
-    else:
-        data_xls = to_excel_bytes(filtered)
-        st.download_button('Завантажити Excel', data=data_xls, file_name='prozorro_filtered.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+st.download_button(
+    label="⬇️ Завантажити результати (CSV)",
+    data=filtered.to_csv(index=False).encode("utf-8"),
+    file_name="filtered_prozorro.csv",
+    mime="text/csv"
+)
