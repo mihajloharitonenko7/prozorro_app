@@ -21,11 +21,12 @@ except Exception as e:
 
 # --- Призначення колонок за назвами CSV ----------------------------------------
 buyer_col = 'supplierName'
-amount_col = 'valueAmount'
-participants_col = None  # Якщо немає
-region_col = None        # Якщо немає
-category_col = 'description'
-date_col = 'dateSigned'
+amount_col = "valueAmount"
+participants_col = "supplierID"  
+buyer_col = "disposerName"
+region_col = "disposerID"         
+category_col = "description"
+date_col = "dateSigned"
 
 # --- Підготовка робочого DataFrame ---------------------------------------------
 work = df.copy()
